@@ -1,6 +1,25 @@
 # SafeGuider input guard — minimal dependencies.
 # Tested with Python 3.9-3.11.
 
+# ---------------------------------------------------------------------------
+# Torch — chọn build CUDA khớp với driver NVIDIA trên máy.
+#
+# Nếu gặp warning "NVIDIA driver on your system is too old (found version XXXXX)",
+# nghĩa là wheel torch mặc định (PyPI = CUDA mới nhất) yêu cầu driver mới hơn,
+# và torch sẽ fallback sang CPU. Cài lại torch với CUDA cũ hơn:
+#
+#   # Driver CUDA 12.4 trở lên → cu121 (an toàn, tương thích rộng):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+#
+#   # Driver CUDA 11.8:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu118
+#
+#   # CPU only (không cần GPU):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+# Hoặc uncomment 1 dòng dưới (pip ≥ 22 hỗ trợ --extra-index-url trong file):
+# --extra-index-url https://download.pytorch.org/whl/cu121
+# ---------------------------------------------------------------------------
 torch>=1.13
 transformers>=4.30
 huggingface_hub>=0.16          # cho snapshot_download local-first
