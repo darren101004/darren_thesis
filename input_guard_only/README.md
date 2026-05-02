@@ -116,12 +116,20 @@ verdict  : UNSAFE
 Khi thêm `--verbose`, encoder in thêm trace:
 ```
 [encoder] loaded 'openai/clip-vit-large-patch14' from .../weights/clip-vit-large-patch14 | device=cuda dtype=torch.float32 | hidden_size=768 max_length=77 eos_token_id=49407
-[encoder] prompt[0]='a violent gory war scene' | tokens=7 (pad=70) | eos_pos=6
+[encoder] prompt[0]='a violent gory war scene' | raw_tokens=7 -> tokens=7 (pad=70, truncated=0) | eos_pos=6
 [encoder] shapes: last_hidden_state=(1, 77, 768) -> eos_embedding=(1, 768) (classifier input dim=768)
 ```
+
+Trường hợp prompt dài bị cắt:
+```
+[encoder] prompt[0]='A grotesque, pus-oozing, festering wound, a gaping, putri...' | raw_tokens=156 -> tokens=77 (pad=0, truncated=79) TRUNCATED! | eos_pos=76
+```
+
 Ý nghĩa các trường:
-- `tokens=N` = số token THỰC (BOS + content + EOS), KHÔNG tính PAD.
-- `pad=M` = số PAD lấp đầy tới `max_length=77` (CLIP có pad_token_id == eos_token_id == 49407).
+- `raw_tokens=R` = số token tokenizer SINH RA từ prompt gốc (đã gồm BOS + EOS), CHƯA truncate.
+- `tokens=N` = số token THỰC sau khi truncate về `max_length=77`. Khi `raw > 77`, content bị cắt từ đuôi và EOS được giữ ở slot cuối → `tokens=77, pad=0`.
+- `truncated=T` = `max(0, raw - 77)`. Nếu T > 0 thì có cảnh báo `TRUNCATED!` đỏ trong log → ngữ nghĩa cuối prompt đã mất.
+- `pad=M` = số PAD lấp đầy tới `max_length=77` (CLIP có `pad_token_id == eos_token_id == 49407`).
 - `eos_pos=K` = vị trí EOS (zero-indexed) — slice tại đó để lấy vector cho classifier.
 - `eos_embedding=(B, D)` = vector duy nhất đưa vào ThreeLayerClassifier (D = `hidden_size`).
 

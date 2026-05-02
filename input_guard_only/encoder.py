@@ -239,12 +239,28 @@ class CLIPEncoder:
         `padding="max_length"` và KHÔNG truyền attention_mask.
 
         Khi `verbose=True`, log:
-          - số token thực của từng prompt (BOS + content + EOS, không tính PAD)
-          - shape của `last_hidden_state` (B, L, D)
-          - shape của `eos_embedding` (B, D) — chính là vector đưa vào classifier
+          - raw_tokens:  số token mà tokenizer SINH RA (đã gồm BOS + EOS),
+                         CHƯA truncate. Nếu > max_length thì sẽ bị cắt bớt.
+          - tokens:      số token THỰC trong sequence sau khi truncate
+                         (BOS + content + EOS, không tính PAD).
+          - truncated:   số token đã bị cắt đi (= max(0, raw - max_length)).
+          - shape của `last_hidden_state` (B, L, D).
+          - shape của `eos_embedding` (B, D) — vector đưa vào classifier.
         """
         if isinstance(prompts, str):
             prompts = [prompts]
+
+        # Pre-tokenize KHÔNG truncate/pad để biết raw token count (chỉ khi verbose
+        # — tránh tốn thời gian ở vòng beam search).
+        raw_token_counts: Optional[List[int]] = None
+        if self.verbose:
+            raw = self.tokenizer(
+                list(prompts),
+                truncation=False,
+                padding=False,
+                return_attention_mask=False,
+            )
+            raw_token_counts = [len(ids) for ids in raw["input_ids"]]
 
         batch = self.tokenizer(
             list(prompts),
@@ -265,7 +281,8 @@ class CLIPEncoder:
         ]
 
         if self.verbose:
-            self._log_encode(prompts, eos_positions, last_hidden_state, eos_embedding)
+            self._log_encode(prompts, eos_positions, last_hidden_state,
+                             eos_embedding, raw_token_counts)
 
         return EncodeResult(
             last_hidden_state=last_hidden_state,
@@ -314,20 +331,37 @@ class CLIPEncoder:
         eos_positions: Tensor,
         last_hidden_state: Tensor,
         eos_embedding: Tensor,
+        raw_token_counts: Optional[List[int]] = None,
     ) -> None:
         """In token-count + shape khi `verbose=True`.
 
-        Token thực = BOS + content + EOS = `eos_position + 1`. Phần còn lại
-        (tới `max_length`) là PAD (cũng = id 49407 với CLIP).
+        - `raw_tokens`: số token sinh ra từ tokenizer (BOS + content + EOS),
+          CHƯA truncate.
+        - `tokens`:     số token THỰC sau truncate trong sequence pad
+          = `eos_position + 1` (vì pad_token_id == eos_token_id ở CLIP).
+        - `truncated`:  `max(0, raw_tokens - max_length)`.
+        - Khi `truncated > 0`, EOS bị giữ ở vị trí cuối cùng của max_length;
+          phần content giữa BOS và EOS bị cắt từ đuôi.
         """
         for i, (p, pos) in enumerate(zip(prompts, eos_positions.tolist())):
             n_tokens = int(pos) + 1
             n_pad = self.max_length - n_tokens
             preview = p if len(p) <= 60 else p[:57] + "..."
-            log.info(
-                f"prompt[{i}]={preview!r} | tokens={n_tokens} (pad={n_pad}) | "
-                f"eos_pos={pos}"
-            )
+
+            if raw_token_counts is not None:
+                raw = raw_token_counts[i]
+                truncated = max(0, raw - self.max_length)
+                trunc_tag = f" TRUNCATED!" if truncated > 0 else ""
+                log.info(
+                    f"prompt[{i}]={preview!r} | raw_tokens={raw} -> "
+                    f"tokens={n_tokens} (pad={n_pad}, truncated={truncated}){trunc_tag} | "
+                    f"eos_pos={pos}"
+                )
+            else:
+                log.info(
+                    f"prompt[{i}]={preview!r} | tokens={n_tokens} (pad={n_pad}) | "
+                    f"eos_pos={pos}"
+                )
         log.info(
             f"shapes: last_hidden_state={tuple(last_hidden_state.shape)} "
             f"-> eos_embedding={tuple(eos_embedding.shape)} "
