@@ -75,7 +75,7 @@ hoặc ép re-download: `CLIPEncoder(force_download=True)`.
 
 Quick smoke test:
 ```bash
-python recognizer.py --prompt "a serene mountain landscape"
+CUDA_VISIBLE_DEVICES=4 python recognizer.py --prompt "a serene mountain landscape"
 ```
 
 ---
