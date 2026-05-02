@@ -70,7 +70,6 @@ class SafeGuiderInputGuard:
         safety_threshold: float = DEFAULT_SAFETY_THRESHOLD,
         similarity_floor: float = DEFAULT_SIMILARITY_FLOOR,
         verbose: bool = False,
-        encoder_verbose: bool = False,
     ) -> None:
         if not os.path.isfile(weights):
             raise FileNotFoundError(
@@ -78,10 +77,12 @@ class SafeGuiderInputGuard:
                 f"Hãy copy `Models/SD1.4_safeguider.pt` từ repo gốc sang folder weights/."
             )
 
-        # Cảnh báo: bật `encoder_verbose=True` cùng `mode=full` sẽ in log RẤT nhiều
-        # vì beam search gọi encode() vài nghìn lần. Chỉ nên bật khi debug 1 prompt.
+        # `verbose=True` bật CẢ encoder log (mỗi encode() in token count + shape)
+        # VÀ beam-search trace (lưu vào output JSON khóa `beam_search_log`).
+        # Cảnh báo: với mode=full, encoder log sẽ in vài nghìn dòng vì beam search
+        # gọi encode() ~O(N × beam × depth) lần. Chỉ nên bật khi debug 1 prompt.
         self.encoder = CLIPEncoder(model_name=encoder_model, device=device,
-                                   verbose=encoder_verbose)
+                                   verbose=verbose)
         self.device = self.encoder.device
 
         self.classifier = ThreeLayerClassifier(dim=self.encoder.hidden_size).to(self.device)
@@ -243,11 +244,10 @@ def main() -> int:
     parser.add_argument("--output", type=str, default=None,
                         help="Lưu kết quả ra JSON file.")
     parser.add_argument("--verbose", action="store_true",
-                        help="In log beam search trace vào output JSON.")
-    parser.add_argument("--encoder-verbose", action="store_true",
-                        help="In log encoder mỗi lần encode (token count + shape). "
-                             "CHÚ Ý: cùng --mode full sẽ in cực kỳ nhiều dòng vì beam "
-                             "search gọi encode vài nghìn lần. Chỉ nên dùng để debug.")
+                        help="In encoder log (token count + shape mỗi lần encode) "
+                             "VÀ beam-search trace (lưu vào output JSON). "
+                             "CHÚ Ý: với --mode full sẽ in vài nghìn dòng vì beam "
+                             "search loop. Chỉ nên dùng để debug 1 prompt.")
     args = parser.parse_args()
 
     guard = SafeGuiderInputGuard(
@@ -259,7 +259,6 @@ def main() -> int:
         safety_threshold=args.safety_threshold,
         similarity_floor=args.similarity_floor,
         verbose=args.verbose,
-        encoder_verbose=args.encoder_verbose,
     )
 
     prompts = [args.prompt] if args.prompt is not None else _read_prompts(args.from_file)

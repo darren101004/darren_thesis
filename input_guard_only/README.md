@@ -100,6 +100,9 @@ python recognizer.py \
     --prompt "..." \
     --weights weights/SD2.1_safeguider.pt \
     --encoder-model laion/CLIP-ViT-H-14-laion2B-s32B-b79K
+
+# Bật log encoder để xem số token + shape embedding + dim vào classifier
+python recognizer.py --verbose --prompt "a violent gory war scene"
 ```
 
 Output mẫu:
@@ -109,6 +112,18 @@ class    : 0 (unsafe)
 score    : 0.0143  (P[unsafe]=0.9857, P[safe]=0.0143)
 verdict  : UNSAFE
 ```
+
+Khi thêm `--verbose`, encoder in thêm trace:
+```
+[encoder] loaded 'openai/clip-vit-large-patch14' from .../weights/clip-vit-large-patch14 | device=cuda dtype=torch.float32 | hidden_size=768 max_length=77 eos_token_id=49407
+[encoder] prompt[0]='a violent gory war scene' | tokens=7 (pad=70) | eos_pos=6
+[encoder] shapes: last_hidden_state=(1, 77, 768) -> eos_embedding=(1, 768) (classifier input dim=768)
+```
+Ý nghĩa các trường:
+- `tokens=N` = số token THỰC (BOS + content + EOS), KHÔNG tính PAD.
+- `pad=M` = số PAD lấp đầy tới `max_length=77` (CLIP có pad_token_id == eos_token_id == 49407).
+- `eos_pos=K` = vị trí EOS (zero-indexed) — slice tại đó để lấy vector cho classifier.
+- `eos_embedding=(B, D)` = vector duy nhất đưa vào ThreeLayerClassifier (D = `hidden_size`).
 
 ### 3.2. Standalone classify (Python)
 ```python
@@ -124,8 +139,12 @@ batch = rec.classify_batch(["a cat", "violent gory ...", "..."])
 ```
 
 ### 3.3. Full pipeline = classify + rewrite (CLI)
-File `pipeline.py` là entry point chính. Nếu prompt UNSAFE, tự động chạy
-beam-search và trả về prompt rewrite.
+File `pipeline.py` là entry point chính, có **2 mode** chọn qua flag `--mode`:
+
+| `--mode`    | Hành vi                                                                                  | Tốc độ        |
+|-------------|-------------------------------------------------------------------------------------------|---------------|
+| `classify`  | Chỉ phán SAFE/UNSAFE (giống `recognizer.py`). 1 lần encode + 1 lần forward classifier.    | ~0.05–0.1s    |
+| `full`      | Classify; nếu UNSAFE thì chạy beam-search rewrite. Default.                                | ~1–3s/prompt  |
 
 ```bash
 # Default: full mode (classify -> rewrite nếu unsafe)
@@ -137,12 +156,12 @@ python pipeline.py --mode classify --prompt "..."
 # Force rewrite kể cả prompt SAFE (debug)
 python pipeline.py --mode full --prompt "..." --force-rewrite
 
-# Batch + lưu JSON
+# Batch + lưu JSON + verbose
 python pipeline.py \
     --mode full \
     --from-file examples/prompts_demo.json \
     --output guard_results.json \
-    --verbose            # thêm trace beam search vào output
+    --verbose
 ```
 
 Output mẫu (mode=full, prompt UNSAFE):
@@ -154,6 +173,11 @@ removed  : ['violent', 'gory']
 modified : safety=0.9621  sim=0.6884
 elapsed  : 1.83s
 ```
+
+**Flag `--verbose`** (cùng tên cho cả `recognizer.py` và `pipeline.py`):
+- Encoder log: in `tokens / pad / eos_pos / shape last_hidden_state / shape eos_embedding / classifier input dim` mỗi lần `encode()`.
+- Beam-search trace (chỉ `pipeline.py` ở `--mode full`): thêm field `beam_search_log` vào output JSON, ghi từng depth của beam search.
+- ⚠️ Với `--mode full`, encoder sẽ in **vài nghìn dòng** vì beam search gọi `encode()` ~`O(N × beam_width × max_depth)` lần. Chỉ nên bật khi debug 1 prompt; với batch nên tắt.
 
 Hyper-params beam search (mặc định khớp paper):
 | flag                  | default | ý nghĩa                                                             |
