@@ -165,6 +165,14 @@ class CLIPEncoder:
         # Import lười để CLIPEncoder không bắt buộc transformers nếu chỉ cần
         # các utility khác (ví dụ load .pt ngoại tuyến).
         from transformers import AutoTokenizer, AutoModel, CLIPTextModel, CLIPTokenizer
+        from transformers import logging as hf_logging
+
+        # Snapshot `openai/clip-vit-large-patch14` chứa FULL CLIP (text + vision +
+        # 2 projection heads + logit_scale). Ta chỉ load `CLIPTextModel` (text-only),
+        # nên transformers sẽ báo UNEXPECTED keys cho mọi `vision_model.*`,
+        # `visual_projection`, `text_projection`, `logit_scale`. Đây là hành vi
+        # mong đợi (text encoder vẫn load đầy đủ và đúng), không phải lỗi → silence.
+        hf_logging.set_verbosity_error()
 
         self.device = torch.device(device) if device else (
             torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
