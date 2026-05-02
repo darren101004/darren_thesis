@@ -50,6 +50,7 @@ class PromptRecognizer:
         encoder_model: str = DEFAULT_ENCODER,
         device: Optional[str] = None,
         safety_threshold: float = 0.5,
+        verbose: bool = False,
     ) -> None:
         """
         Args:
@@ -58,6 +59,8 @@ class PromptRecognizer:
             device:            "cuda" | "cpu" | None (auto).
             safety_threshold:  ngưỡng score để verdict SAFE/UNSAFE
                                (chỉ ảnh hưởng `is_safe`, không ảnh hưởng `predicted_class`).
+            verbose:           bật encoder log (token count, shape sau embedding,
+                               size vector vào classifier).
         """
         if not os.path.isfile(weights):
             raise FileNotFoundError(
@@ -66,7 +69,7 @@ class PromptRecognizer:
                 f"hoặc truyền --weights/--classifier-weights."
             )
 
-        self.encoder = CLIPEncoder(model_name=encoder_model, device=device)
+        self.encoder = CLIPEncoder(model_name=encoder_model, device=device, verbose=verbose)
         self.device = self.encoder.device
         self.safety_threshold = float(safety_threshold)
 
@@ -150,6 +153,8 @@ def main() -> int:
                         help="Safety score threshold để verdict SAFE/UNSAFE.")
     parser.add_argument("--output", type=str, default=None,
                         help="(optional) Lưu list kết quả ra JSON file.")
+    parser.add_argument("--verbose", action="store_true",
+                        help="In log encoder (số token thực + shape embedding + dim vào classifier).")
     args = parser.parse_args()
 
     rec = PromptRecognizer(
@@ -157,6 +162,7 @@ def main() -> int:
         encoder_model=args.encoder_model,
         device=args.device,
         safety_threshold=args.threshold,
+        verbose=args.verbose,
     )
 
     if args.prompt is not None:

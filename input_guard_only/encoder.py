@@ -23,7 +23,9 @@ flag `--encoder-model`. Mặc định = `openai/clip-vit-large-patch14`
 
 from __future__ import annotations
 
+import logging
 import os
+import sys
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
@@ -40,6 +42,17 @@ CLIP_EOS_TOKEN_ID = 49407
 # folder con `<weights>/<model_basename>/` (ví dụ `weights/clip-vit-large-patch14/`)
 # để dễ quản lý — không lẫn vào HuggingFace cache mặc định ở ~/.cache/huggingface.
 DEFAULT_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights")
+
+
+# Module logger — tách riêng khỏi root logger để bật/tắt được mà không ảnh
+# hưởng cấu hình logging chung. Chỉ in khi `CLIPEncoder(verbose=True)`.
+log = logging.getLogger("safeguider.encoder")
+if not log.handlers:
+    _h = logging.StreamHandler(stream=sys.stderr)
+    _h.setFormatter(logging.Formatter("[encoder] %(message)s"))
+    log.addHandler(_h)
+    log.setLevel(logging.INFO)
+    log.propagate = False
 
 
 def _is_loadable_dir(path: str) -> bool:
@@ -161,6 +174,7 @@ class CLIPEncoder:
         eos_token_id: int = CLIP_EOS_TOKEN_ID,
         dtype: torch.dtype = torch.float32,
         force_download: bool = False,
+        verbose: bool = False,
     ) -> None:
         # Import lười để CLIPEncoder không bắt buộc transformers nếu chỉ cần
         # các utility khác (ví dụ load .pt ngoại tuyến).
@@ -181,6 +195,7 @@ class CLIPEncoder:
         self.eos_token_id = eos_token_id
         self.model_name = model_name
         self.cache_dir = cache_dir
+        self.verbose = bool(verbose)
 
         # Local-first resolve: trả về 1 local folder, KHÔNG dùng HF cache mặc định.
         local_path = resolve_encoder_path(model_name, cache_dir=cache_dir,
@@ -206,6 +221,14 @@ class CLIPEncoder:
         # Suy ra hidden_size — dùng để khởi tạo classifier.
         self.hidden_size: int = int(self.text_encoder.config.hidden_size)
 
+        if self.verbose:
+            log.info(
+                f"loaded {model_name!r} from {local_path} | "
+                f"device={self.device} dtype={dtype} | "
+                f"hidden_size={self.hidden_size} max_length={self.max_length} "
+                f"eos_token_id={self.eos_token_id}"
+            )
+
     # ----------------------------- Core API ----------------------------- #
 
     @torch.no_grad()
@@ -214,6 +237,11 @@ class CLIPEncoder:
 
         KHỚP với `FrozenCLIPEmbedder.forward` của LDM: tokenize với
         `padding="max_length"` và KHÔNG truyền attention_mask.
+
+        Khi `verbose=True`, log:
+          - số token thực của từng prompt (BOS + content + EOS, không tính PAD)
+          - shape của `last_hidden_state` (B, L, D)
+          - shape của `eos_embedding` (B, D) — chính là vector đưa vào classifier
         """
         if isinstance(prompts, str):
             prompts = [prompts]
@@ -235,6 +263,9 @@ class CLIPEncoder:
         eos_embedding = last_hidden_state[
             torch.arange(last_hidden_state.size(0), device=self.device), eos_positions
         ]
+
+        if self.verbose:
+            self._log_encode(prompts, eos_positions, last_hidden_state, eos_embedding)
 
         return EncodeResult(
             last_hidden_state=last_hidden_state,
@@ -276,3 +307,29 @@ class CLIPEncoder:
     def cosine_similarity(a: Tensor, b: Tensor) -> Tensor:
         """Cosine similarity giữa 2 batch embedding (B, D)."""
         return F.cosine_similarity(a, b, dim=-1)
+
+    def _log_encode(
+        self,
+        prompts: Sequence[str],
+        eos_positions: Tensor,
+        last_hidden_state: Tensor,
+        eos_embedding: Tensor,
+    ) -> None:
+        """In token-count + shape khi `verbose=True`.
+
+        Token thực = BOS + content + EOS = `eos_position + 1`. Phần còn lại
+        (tới `max_length`) là PAD (cũng = id 49407 với CLIP).
+        """
+        for i, (p, pos) in enumerate(zip(prompts, eos_positions.tolist())):
+            n_tokens = int(pos) + 1
+            n_pad = self.max_length - n_tokens
+            preview = p if len(p) <= 60 else p[:57] + "..."
+            log.info(
+                f"prompt[{i}]={preview!r} | tokens={n_tokens} (pad={n_pad}) | "
+                f"eos_pos={pos}"
+            )
+        log.info(
+            f"shapes: last_hidden_state={tuple(last_hidden_state.shape)} "
+            f"-> eos_embedding={tuple(eos_embedding.shape)} "
+            f"(classifier input dim={self.hidden_size})"
+        )
