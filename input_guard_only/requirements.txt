@@ -1,0 +1,12 @@
+# SafeGuider input guard — minimal dependencies.
+# Tested with Python 3.9-3.11.
+
+torch>=1.13
+transformers>=4.30
+huggingface_hub>=0.16          # cho snapshot_download local-first
+tqdm>=4.60
+numpy>=1.23
+
+# Lần đầu chạy, encoder.py sẽ snapshot_download model HF
+# (default `openai/clip-vit-large-patch14`) vào folder local
+# `weights/clip-vit-large-patch14/` để các lần sau load offline.
