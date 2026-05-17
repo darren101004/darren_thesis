@@ -1,0 +1,23 @@
+# LLM / API
+openai
+google-genai
+json-repair
+
+# Config & data
+python-dotenv
+pandas
+
+# Models / validation
+pydantic
+
+# Images (generator_service)
+Pillow
+
+# Local model backend (gen_multihop_using_local_model.py)
+torch
+transformers
+huggingface_hub
+accelerate
+
+# Tests (optional; remove if you only deploy scripts)
+pytest
